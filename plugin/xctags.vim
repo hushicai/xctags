@@ -20,7 +20,7 @@ if xctags#setup() == ''
     finish
 endif
 
-augroup PluginXproj
+augroup xplugin
     autocmd!
     au VimEnter * call xctags#init()
     au BufReadPost * call xctags#cache()
