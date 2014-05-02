@@ -14,6 +14,7 @@ function! xctags#register()
 endfunction
 " }}} "
  
+" init {{{ "
 function! xctags#init() 
     if !exists('g:xctags_language') || empty(g:xctags_language)
         return
@@ -34,12 +35,14 @@ function! xctags#init()
         endif
     endfor
 endfunction
+" }}} "
 
 " cache tags {{{ "
 let s:xctags_cache = {}
 let s:tags = &tags
 function! xctags#cache()
     if !s:CheckSupportedLanguage()
+        exec "silent set tags=" . s:tags
         return
     endif
     let tagsfile = s:GetTagsFileByFileType(&ft)
@@ -54,6 +57,7 @@ function! xctags#cache()
 endfunction
 " }}} "
 
+" update {{{1 "
 function! xctags#update()
     if !s:CheckSupportedLanguage()
         return
@@ -68,27 +72,104 @@ function! xctags#update()
         return
     endif
     let s:xctags_cache[cfile] = newcachesha
-    " update tags
-    let tagsfile = s:GetTagsFileByFileType(&ft)
-    " first, remove it
-    call s:RemoveTags(tagsfile, cfile)
-    " then, append new tags
-    call s:AddTags(tagsfile, resp)
-endfunction
 
+    " update tags
+    " TODO: how to optimize?
+    let tagsfile = s:GetTagsFileByFileType(&ft)
+    let [headers, indexer] = s:ReadTagsFile(tagsfile)
+    let newlines = s:ParseLines(resp)
+    let indexer[cfile] = newlines
+    let lines = []
+    for key in keys(indexer)
+        call extend(lines, get(indexer, key, []))
+    endfor
+
+    " write tagsfile
+    call s:WriteTagsFile(tagsfile, headers, lines)
+endfunction
+" }}} "
+
+" WriteTagsFile {{{ "
+function! s:WriteTagsFile(tagsfile, headers, lines)
+    call map(a:lines, 's:JoinLine(v:val)')
+
+    " sort it
+    call sort(a:lines)
+
+    let result = []
+    call extend(result, a:headers)
+    call extend(result, a:lines)
+
+    return writefile(result, a:tagsfile)
+endfunction
+" }}} "
+
+" ReadTagsFile {{{ "
+function! s:ReadTagsFile(tagsfile)
+    let headers = []
+    "let lines = []
+    let indexer = {}
+
+    for line in readfile(a:tagsfile)
+        if line =~# '^!_TAG_'
+            call add(headers, line)
+        else
+            let entry = s:ParseLine(line)
+            if !empty(entry)
+                if !has_key(indexer, entry[1])
+                    let indexer[entry[1]] = []
+                endif
+                let index = get(indexer, entry[1], [])
+                call add(index, line)
+                "call add(lines, line)
+            endif
+        endif
+    endfor
+
+    return [headers, indexer]
+endfunction
+" }}} "
+
+
+" ParseLine {{{ "
+function! s:ParseLine(line)
+    let fields = split(a:line, "\t")
+    return len(fields) >= 3 ? fields : []
+endfunction
+" }}} "
+
+" ParseLines {{{ "
+function! s:ParseLines(lines)
+    let lines = split(a:lines, "\n")
+    call map(lines, 's:ParseLine(v:val)')
+
+    return filter(lines, '!empty(v:val)')
+endfunction
+" }}} "
+
+" JoinLine {{{ "
+function! s:JoinLine(value)
+    return type(a:value) == type([]) ? join(a:value, "\t") : a:value
+endfunction
+" }}} "
+
+" GetTagsFileByFileType {{{ "
 function! s:GetTagsFileByFileType(cft)
     if a:cft == ''
         return
     endif
     return s:NormalizePath(g:xctags_tags_directory_name . '/' . a:cft)
 endfunction
+" }}} "
 
+" CheckSupportedLanguage {{{ "
 function! s:CheckSupportedLanguage()
-    if &ft == '' || empty(get(g:xctags_language, &ft, {}))
+    if &ft == '' || !exists('g:xctags_language') || empty(get(g:xctags_language, &ft, {}))
         return 0
     endif
     return 1
 endfunction
+" }}} "
 
 " FindProjConfigFile {{{ "
 function! s:FindProjConfigFile()
@@ -120,20 +201,23 @@ function! s:BuildCmdLine(language, cfile, tagsfile)
     let program = get(config, 'cmd', g:xctags_ctags_cmd)
     let args = get(config, 'args', [])
     let cmdline = [program] + args
-    " if not file specificed, parse all identifiers files
+    " if not file specified, parse all identifiers files
     if a:cfile == ''
+        " for all matched files
         " `find` just support *nix os
-        let prefix = ['find ' . s:project_dir . ' -type f', '|', 'xargs']
-        let cmdline = prefix + cmdline
         let identifiers = get(config, 'identifiers', [])
-        call add(cmdline, '--sort=yes')
-        call add(cmdline, '-I "' . join(identifiers) . '"')
+        let prefix = [
+            \'find -E ' . s:project_dir . ' -regex ".*\.(' . join(identifiers, '|') . ')"', 
+            \'|', 
+            \'xargs'
+            \]
+        unlet identifiers
+        let cmdline = prefix + cmdline
         " configurable tagfile path?
         call add(cmdline, '-f ' . a:tagsfile)
-        "call add(cmdline, '-R')
     else
+        " for one specificed file
         let filename = s:NormalizePath(a:cfile)
-        call add(cmdline, '--sort=no')
         " incrementally update, put to standout first
         call add(cmdline, '-f-')
         call add(cmdline, filename)
@@ -143,18 +227,9 @@ function! s:BuildCmdLine(language, cfile, tagsfile)
 endfunction
 " }}} "
 
-function! s:RemoveTags(tagsfile, cfile)
-  let filename = s:NormalizePath(a:cfile)
-  let filename = escape(filename, './')
-  let cmd = 'sed -i '' "/' . filename . '/d" "' . a:tagsfile . '"'
-  let resp = system(cmd)
-endfunction
 
-function! s:AddTags(tagsfile, lines)
-    echom lines
-    let cmd = 'silent !echo "' . escape(a:lines,'"/') . '" >> ' .a:tagsfile
-    echom cmd
-    let resp = system(cmd)
-endfunction
+ 
+
+
 
 " vim: ts=4 sw=4 foldmethod=marker

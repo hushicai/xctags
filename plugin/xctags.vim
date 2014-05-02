@@ -30,4 +30,7 @@ augroup END
 " Make sure the plug-in is only loaded once.
 let g:xctags_loaded = 1
 
-" vim: ts=4 sw=4
+
+
+
+" vim: ts=4 sw=4 foldmethod=marker
