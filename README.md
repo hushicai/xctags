@@ -1,4 +1,4 @@
 xctags
 ======
 
-vim auto tags
+This guy is so lazy!
