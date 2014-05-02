@@ -16,7 +16,7 @@ if !exists('g:xctags_tags_directory_name')
     let g:xctags_tags_directory_name = '.tags'
 endif
 
-if xctags#register() == ''
+if xctags#setup() == ''
     finish
 endif
 

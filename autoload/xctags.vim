@@ -1,8 +1,8 @@
 let g:xctags#version = '0.0.1'
 
-" register project {{{ "
+" setup {{{ "
 let s:project_dir = ''
-function! xctags#register()
+function! xctags#setup()
     let config = s:FindProjConfigFile()
     if config != ''
         exec "silent source" . config
