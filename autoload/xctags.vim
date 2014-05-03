@@ -6,7 +6,7 @@ let s:project_dir = ''
 function! xctags#setup()
     let config = s:FindProjConfigFile()
     if config != ''
-        exec "silent source" . config
+        exec "silent source " . config
         let config = resolve(getcwd() . '/' . config)
         let project_dir = fnamemodify(config, ':h')
         let s:project_dir = project_dir
