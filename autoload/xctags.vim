@@ -1,14 +1,15 @@
 let g:xctags#version = '0.0.1'
 
 " setup {{{ "
+" every path is relative the `project_dir`
 let s:project_dir = ''
 function! xctags#setup()
     let config = s:FindProjConfigFile()
     if config != ''
         exec "silent source" . config
         let config = resolve(getcwd() . '/' . config)
-        let projDir = fnamemodify(config, ':h')
-        let s:project_dir = projDir
+        let project_dir = fnamemodify(config, ':h')
+        let s:project_dir = project_dir
     endif
     return config
 endfunction
@@ -20,57 +21,71 @@ function! xctags#init()
         return
     endif
 
-    let tagsDir = s:NormalizePath(g:xctags_tags_directory_name)
-    if !isdirectory(tagsDir)
-        exec "silent !mkdir " . tagsDir
+    let tags_dir = s:NormalizePath(g:xctags_tags_directory_name)
+    if !isdirectory(tags_dir)
+        exec "silent !mkdir " . tags_dir
     endif
 
-    for key in keys(g:xctags_language) 
-        let tagsfile = s:NormalizePath(g:xctags_tags_directory_name . '/' . key)
-        " generate tags in local directory, classify by filetype
-        " generate tags once for the first time
-        if !filereadable(tagsfile)
-            let cmd = s:BuildCmdLine(key, '', tagsfile)
-            exec "silent !" . cmd
-        endif
+    " generate tags in local project directory, classify by filetype
+    for cft in keys(g:xctags_language) 
+        call s:ExecCtags(cft)
     endfor
 endfunction
 " }}} "
-
+ 
+" set tags {{{ "
+let s:tags = &tags
+function! xctags#set()
+    if s:CheckSupportedLanguage()
+        let tagsfile = s:GetTagsFileByFileType(&ft)
+    else 
+        let tagsfile = ''
+    endif
+    exec "silent set tags=" .  (tagsfile != '' ? (tagsfile . ',') : '') . s:tags
+endfunction
+" }}} "
+ 
 " cache tags {{{ "
 let s:xctags_cache = {}
-let s:tags = &tags
 function! xctags#cache()
     if !s:CheckSupportedLanguage()
-        exec "silent set tags=" . s:tags
         return
     endif
-    let tagsfile = s:GetTagsFileByFileType(&ft)
-    exec "silent set tags=" .  tagsfile . ',' . s:tags
 
+    let resp = s:RunCtags(&ft)
     let cfile = expand('%:p')
-    let cmdline = s:BuildCmdLine(&ft, cfile, '')
-    let resp = system(cmdline)
     if get(s:xctags_cache, cfile, '') == ''
         let s:xctags_cache[cfile] = sha256(resp)
     endif
 endfunction
 " }}} "
 
-" update {{{1 "
+" update {{{ "
 function! xctags#update()
     if !s:CheckSupportedLanguage()
         return
     endif
+    let tagsfile = s:GetTagsFileByFileType(&ft)
     let cfile = expand('%:p')
-    let cmdline = s:BuildCmdLine(&ft, cfile, '')
-    let resp = system(cmdline)
     let cachesha = get(s:xctags_cache, cfile, '')
+
+    " run one more ctags program
+    let resp = s:RunCtags(&ft)
     let newcachesha = sha256(resp)
+
+    " check if outdate
     if cachesha != '' && cachesha == newcachesha
         " no updates
         return
     endif
+
+    " if tagsfile doesn't exist
+    " TODO: create a new one?
+    if !filereadable(tagsfile)
+        return
+    endif
+
+    " update cache
     let s:xctags_cache[cfile] = newcachesha
 
     " update tags
@@ -88,12 +103,34 @@ function! xctags#update()
     call s:WriteTagsFile(tagsfile, headers, lines)
 endfunction
 " }}} "
+ 
+" exec ctags in shell {{{ " 
+function! s:ExecCtags(cft)
+    let tagsfile = s:GetTagsFileByFileType(a:cft)
+
+    " update all the time?
+    if !filereadable(tagsfile)
+        let cmdline = s:BuildCmdLine(a:cft, tagsfile)
+        exec "silent !" . cmdline
+    endif
+     
+    return tagsfile
+endfunction
+" }}} "
+
+" run ctags in vim {{{ "
+function! s:RunCtags(cft)
+    let cmdline = s:BuildCmdLine(a:cft, '-')
+    return system(cmdline)
+endfunction
+" }}} "
 
 " WriteTagsFile {{{ "
 function! s:WriteTagsFile(tagsfile, headers, lines)
-    call map(a:lines, 's:JoinLine(v:val)')
-
-    " sort it
+    " force it sorted
+    " ignore `--sort=no` option
+    " treat it sorted always
+    " this is the default way.
     call sort(a:lines)
 
     let result = []
@@ -107,7 +144,6 @@ endfunction
 " ReadTagsFile {{{ "
 function! s:ReadTagsFile(tagsfile)
     let headers = []
-    "let lines = []
     let indexer = {}
 
     for line in readfile(a:tagsfile)
@@ -121,7 +157,6 @@ function! s:ReadTagsFile(tagsfile)
                 endif
                 let index = get(indexer, entry[1], [])
                 call add(index, line)
-                "call add(lines, line)
             endif
         endif
     endfor
@@ -129,7 +164,6 @@ function! s:ReadTagsFile(tagsfile)
     return [headers, indexer]
 endfunction
 " }}} "
-
 
 " ParseLine {{{ "
 function! s:ParseLine(line)
@@ -141,7 +175,6 @@ endfunction
 " ParseLines {{{ "
 function! s:ParseLines(lines)
     let lines = split(a:lines, "\n")
-    call map(lines, 's:ParseLine(v:val)')
 
     return filter(lines, '!empty(v:val)')
 endfunction
@@ -186,6 +219,7 @@ endfunction
 " }}} "
  
 " NormalizePath {{{ "
+" everything thiing is absolute. file path,tag path,tags option,etc.
 function! s:NormalizePath(posix)
     " is an absolute path
     if a:posix =~ '^/'
@@ -196,16 +230,18 @@ endfunction
 " }}} "
 
 " BuildCmdLine {{{ "
-function! s:BuildCmdLine(language, cfile, tagsfile)
-    let config = g:xctags_language[a:language]
-    let program = get(config, 'cmd', g:xctags_ctags_cmd)
-    let args = get(config, 'args', [])
+function! s:BuildCmdLine(cft, tagsfile)
+    let ft_config = g:xctags_language[a:cft]
+    let program = get(ft_config, 'cmd', g:xctags_ctags_cmd)
+    let args = get(ft_config, 'args', [])
     let cmdline = [program] + args
-    " if not file specified, parse all identifiers files
-    if a:cfile == ''
+
+    call add(cmdline, '-f ' . a:tagsfile)
+
+    if a:tagsfile != '-'
         " for all matched files
+        let identifiers = get(ft_config, 'identifiers', [])
         " `find` just support *nix os
-        let identifiers = get(config, 'identifiers', [])
         let prefix = [
             \'find -E ' . s:project_dir . ' -regex ".*\.(' . join(identifiers, '|') . ')"', 
             \'|', 
@@ -213,13 +249,12 @@ function! s:BuildCmdLine(language, cfile, tagsfile)
             \]
         unlet identifiers
         let cmdline = prefix + cmdline
-        " configurable tagfile path?
-        call add(cmdline, '-f ' . a:tagsfile)
+        "call add(cmdline, '-f ' . a:tagsfile)
     else
-        " for one specificed file
-        let filename = s:NormalizePath(a:cfile)
+        " usually, for one specified file
+        let filename = expand('%:p')
         " incrementally update, put to standout first
-        call add(cmdline, '-f-')
+        "call add(cmdline, '-f-')
         call add(cmdline, filename)
     endif
 

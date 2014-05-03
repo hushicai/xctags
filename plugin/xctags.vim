@@ -23,6 +23,7 @@ endif
 augroup xplugin
     autocmd!
     au VimEnter * call xctags#init()
+    au BufRead * call xctags#set()
     au BufReadPost * call xctags#cache()
     au BufWritePost * call xctags#update()
 augroup END
