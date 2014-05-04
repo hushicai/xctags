@@ -9,7 +9,7 @@ endfunction
 " }}} log "
 
 " setup {{{ "
-" every path is relative the `project_dir`
+" every path is relative to the `project_dir`
 let s:project_dir = ''
 function! xctags#setup()
     call xctags#log('setting up project...')
@@ -131,7 +131,6 @@ function! xctags#schedule()
         return
     endif
 
-    let now_time = localtime()
     call xctags#log('begin a frame.')
 
     " cache it first
@@ -141,6 +140,7 @@ function! xctags#schedule()
     endif
 
     " for update?
+    let now_time = localtime()
     if s:xctags_schedule_last_time != 0 && (now_time - s:xctags_schedule_last_time < g:xctags_schedule_interval)
         return
     endif
@@ -275,71 +275,6 @@ function! s:GetTempname(ext)
     return $HOME . "/tmp/" . sha256(expand('%:p')) . a:ext
 endfunction
 " }}} create temp filename "
-
-" WriteTagsFile {{{ "
-function! s:WriteTagsFile(tagsfile, headers, lines)
-    " force it sorted
-    " ignore `--sort=no` option
-    " treat it sorted always
-    " this is the default way.
-    call sort(a:lines)
-
-    let result = []
-    call extend(result, a:headers)
-    call extend(result, a:lines)
-
-    " async write file?
-    silent exec '!echo ' . shellescape(join(result, '\n')) . ' > ' . a:tagsfile . ' &'
-    "return writefile(result, a:tagsfile)
-endfunction
-" }}} "
-
-" ReadTagsFile {{{ "
-function! s:ReadTagsFile(tagsfile)
-    let headers = []
-    let indexer = {}
-    let lines = []
-
-    for line in readfile(a:tagsfile)
-        if line =~# '^!_TAG_'
-            call add(headers, line)
-        else
-            let entry = s:ParseLine(line)
-            if !empty(entry)
-                if !has_key(indexer, entry[1])
-                    let indexer[entry[1]] = []
-                endif
-                let index = get(indexer, entry[1], [])
-                call add(index, line)
-                call add(lines, line)
-            endif
-        endif
-    endfor
-
-    return [headers, indexer, lines]
-endfunction
-" }}} "
-
-" ParseLine {{{ "
-function! s:ParseLine(line)
-    let fields = split(a:line, "\t")
-    return len(fields) >= 3 ? fields : []
-endfunction
-" }}} "
-
-" ParseLines {{{ "
-function! s:ParseLines(lines)
-    let lines = split(a:lines, "\n")
-
-    return filter(lines, '!empty(v:val)')
-endfunction
-" }}} "
-
-" JoinLine {{{ "
-function! s:JoinLine(value)
-    return type(a:value) == type([]) ? join(a:value, "\t") : a:value
-endfunction
-" }}} "
 
 " GetTagsFileByFileType {{{ "
 function! s:GetTagsFileByFileType(cft)
