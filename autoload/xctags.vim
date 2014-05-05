@@ -27,24 +27,11 @@ function! xctags#setup()
 endfunction
 " }}} "
 
-" clean buffer {{{ "
+" clean {{{ "
 function! xctags#clean()
-    if !s:CheckSupportedLanguage()
-        return
-    endif
-    let filename = expand('%:p')
-    call xctags#log('leave..., ' . filename)
-    let tempname = sha256(filename)
-    let cachefile = s:GetTempname('.cache')
-    let checkfile = s:GetTempname('.check')
-    if filereadable(cachefile)
-        call delete(cachefile)
-    endif
-    if filereadable(checkfile)
-        call delete(checkfile)
-    endif
+    " nothing for the moment
 endfunction
-" }}} clean buffer "
+" }}} clean"
  
 " init {{{ "
 function! xctags#init() 
@@ -78,17 +65,20 @@ endfunction
 
 " cache {{{ "
 let s:xctags_cache_ftime = {}
+let s:xctags_cache_sha256 = {}
 function! xctags#cache()
     if !s:CheckSupportedLanguage()
         return
     endif
+
+    call xctags#log("cahched: " . string(s:xctags_cache_sha256))
 
     let filename = expand('%:p')
     let s:xctags_cache_ftime[filename] = getftime(filename)
 
     let sha = get(s:xctags_cache_sha256, filename, '')
     if sha != ''
-        call xctags#log('tags have beed cached!')
+        call xctags#log('tags cached!')
         return
     endif
 
@@ -135,7 +125,7 @@ function! xctags#schedule()
 
     " cache it first
     if s:CacheTags() == 0
-        call xctags#log('caching tags continue...')
+        call xctags#log('tags not cached,  go to next frame.')
         return
     endif
 
@@ -148,13 +138,13 @@ function! xctags#schedule()
 
     " then check
     if s:CheckTags() == 0
-        call xctags#log('checking tags continue...')
+        call xctags#log('tags not changed, go to next frame.')
         return
     endif
 
     " finally update
     if s:UpdateTags() == 0
-        call xctags#log('updating tags continue...')
+        call xctags#log('tags not updated, go to next frame')
         return
     endif
 
@@ -186,7 +176,6 @@ endfunction
 " }}} "
 
 " cache tags {{{ "
-let s:xctags_cache_sha256 = {}
 function! s:CacheTags()
     let filename = expand('%:p')
     let sha = get(s:xctags_cache_sha256, filename, '')
@@ -235,11 +224,15 @@ function! s:UpdateTags()
         let filename = expand('%:p')
         " update cache here to make sure that cache and tagsfile is consistent
         let s:xctags_cache_sha256[filename] = sha256(join(readfile(tempname), '\n'))
-        call xctags#log("updating tags...")
-        call s:RemoveOldTags()
-        call s:AddNewTags()
+        let cmd_remove_tags = "sed -i '' '/" . escape(filename, './') . "/d' " . tagsfile
+        let cmd_add_tags = 'cat ' . tempname . ' >> ' . tagsfile
+        let cmd_remove_tempname = "rm " . tempname
+        let cmd = '!{' . cmd_remove_tags . ';' . cmd_add_tags .  ';' . cmd_remove_tempname . '} &'
+        call xctags#log("updating tags: " . cmd)
+        silent exec cmd
+        "call s:RemoveOldTags()
+        "call s:AddNewTags()
         call xctags#log('update tags, done!')
-        call delete(tempname)
         return 1
     else
         return 0
