@@ -33,7 +33,7 @@ augroup xplugin
     autocmd!
     au VimEnter * call xctags#init()
     au BufRead * call xctags#cache()
-    au BufRead * call xctags#set()
+    au BufEnter * call xctags#set()
     au BufLeave * call xctags#clean()
     au BufWritePost * call xctags#update()
     au CursorHold * call xctags#schedule()
